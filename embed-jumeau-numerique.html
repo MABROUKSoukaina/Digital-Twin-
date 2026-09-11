@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Démo interactive : jumeau numérique d’un réseau d’eau</title>
+<style>
+  :root{
+    --paper:#F5F7F6; --ink:#1D2B36; --muted:#5B6870; --line:#C9D2D5; --soft:#E6EBEB;
+    --water:#1F6FB2; --amber:#F2B33D; --alert:#D6336C; --ok:#2F9E6A;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:transparent;color:var(--ink);
+    font:17px/1.6 "Source Sans 3","Segoe UI",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+  main{max-width:none;margin:0;padding:0}
+  h1{font-family:Lora,Georgia,"Times New Roman",serif;font-weight:600;font-size:clamp(26px,3.4vw,36px);line-height:1.2;margin:0 0 8px}
+  .intro{color:var(--muted);max-width:72ch;margin:0 0 22px}
+
+  .twin{display:grid;grid-template-columns:minmax(0,1fr) 330px;height:min(80vh,700px);min-height:520px;border:1px solid var(--line);background:#fff}
+  .compare{position:relative;height:100%;overflow:hidden;background:#DCE2E0;touch-action:none}
+  /* Spécificité renforcée : MapLibre impose position:relative sur .maplibregl-map */
+  .compare > .map{position:absolute;top:0;left:0;width:100%;height:100%}
+  .compare > #model{pointer-events:none}
+  .side{position:absolute;top:12px;z-index:3;padding:3px 10px;font-size:14px;font-weight:600;background:rgba(255,255,255,.93);pointer-events:none}
+  .side.left{left:12px} .side.right{right:12px}
+  .hint{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:3;padding:5px 12px;font-size:14px;background:rgba(29,43,54,.88);color:#fff;pointer-events:none;white-space:nowrap}
+  .divider{position:absolute;top:0;bottom:0;z-index:4;width:0;left:50%}
+  .divider::before{content:"";position:absolute;top:0;bottom:0;left:-1px;width:2px;background:#fff;box-shadow:0 0 0 1px rgba(29,43,54,.35)}
+  .knob{position:absolute;top:50%;left:0;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:var(--ink);border:3px solid #fff;cursor:ew-resize;display:grid;place-items:center;box-shadow:0 2px 8px rgba(0,0,0,.35);touch-action:none}
+  .knob:focus-visible{outline:3px solid var(--amber);outline-offset:3px}
+  .knob svg{width:22px;height:22px}
+  .divider-hit{position:absolute;top:0;bottom:0;left:-14px;width:28px;cursor:ew-resize;touch-action:none}
+  .notice{position:absolute;inset:0;z-index:6;display:none;align-items:center;justify-content:center;padding:24px;text-align:center;background:var(--paper)}
+  .notice.show{display:flex} .notice p{max-width:46ch;margin:0}
+
+  /* Panneau du jumeau */
+  .panel{border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0;min-height:0;overflow-y:auto}
+  .panel-head{background:var(--ink);color:#fff;padding:14px 16px}
+  .panel-head h2{font-family:Lora,Georgia,serif;font-weight:600;font-size:20px;margin:0;line-height:1.25}
+  .sync{display:flex;align-items:center;gap:8px;font-size:14px;color:#D2DDE1;margin-top:4px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);flex:none}
+  .sec{padding:12px 16px;border-bottom:1px solid var(--soft)}
+  .kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .kpi-label{font-size:13px;color:var(--muted);line-height:1.3}
+  .kpi-value{font-size:26px;font-weight:700;line-height:1.15;font-variant-numeric:tabular-nums}
+  .kpi-unit{font-size:14px;font-weight:600;color:var(--muted);margin-left:3px}
+  .spark{display:block;width:100%;height:56px;margin-top:8px;background:#F3F6F7}
+  .scenario-title{font-weight:700;margin:0 0 4px}
+  .scenario p{margin:0;font-size:15px;color:var(--muted)}
+  .scenario.alert{background:#FDF0F4}
+  .scenario.alert .scenario-title{color:var(--alert)}
+  .results{display:grid;grid-template-columns:1fr auto;gap:2px 10px;margin:8px 0 10px;font-size:15px}
+  .results b{font-variant-numeric:tabular-nums;text-align:right}
+  .action{font:inherit;font-size:15px;font-weight:600;width:100%;padding:8px 12px;border:0;background:var(--water);color:#fff;cursor:pointer;border-radius:2px}
+  .action.secondary{background:var(--ink)}
+  .action:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+  .log{list-style:none;margin:0;padding:0;font-size:14px}
+  .log li{display:grid;grid-template-columns:auto 1fr;gap:8px;padding:3px 0;color:var(--ink)}
+  .log time{color:var(--muted);font-variant-numeric:tabular-nums}
+  .log li.alert span{color:var(--alert);font-weight:600}
+  .sec-title{font-size:14px;font-weight:700;margin:0 0 4px}
+  .panel-foot{padding:10px 16px;font-size:13px;color:var(--muted);margin-top:auto}
+
+  .controls{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center;justify-content:space-between;margin-top:14px}
+  .group{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .group-label{font-size:14px;color:var(--muted)}
+  button.opt{font:inherit;font-size:15px;padding:6px 12px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;border-radius:2px}
+  button.opt:hover{border-color:var(--ink)}
+  button.opt[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
+  button.opt:focus-visible{outline:3px solid var(--water);outline-offset:2px}
+  .legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:14px;color:var(--muted);margin-top:12px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{display:inline-block;width:22px;height:4px;background:var(--water)}
+  .sw.iso{height:8px;background:var(--amber)}
+  .sw.bld{width:14px;height:12px;background:var(--alert)}
+  .sw.c{width:12px;height:12px;border-radius:50%;background:#fff;border:3px solid var(--ok)}
+  .sw.v{width:11px;height:11px;border-radius:50%;background:#fff;border:2px solid var(--ink)}
+  figcaption{color:var(--muted);font-size:15px;line-height:1.55;margin-top:12px;max-width:80ch}
+  .credit{display:block;margin-top:4px;font-size:13px}
+  .credit-only{margin-top:6px;text-align:center;max-width:none}
+  .legend{justify-content:center}
+  @media (max-width:900px){.twin{grid-template-columns:1fr;height:auto}.panel{border-left:0;border-top:1px solid var(--line);overflow:visible}.compare{height:64vh;min-height:420px}}
+  .map-btn{position:absolute;right:12px;bottom:14px;z-index:3}
+</style>
+</head>
+<body>
+<main>
+
+  <figure style="margin:0">
+    <div class="twin">
+      <div class="compare" id="compare">
+        <div class="map" id="real"></div>
+        <div class="map" id="model"></div>
+        <span class="side left">Réalité : image satellite</span>
+        <span class="side right">Jumeau numérique</span>
+        <span class="hint" id="hint">Cliquez sur une conduite bleue pour simuler une casse</span>
+        <div class="divider" id="divider">
+          <div class="divider-hit" id="dividerHit"></div>
+          <div class="knob" id="knob" role="slider" tabindex="0" aria-label="Position du curseur de comparaison" aria-valuemin="0" aria-valuemax="100" aria-valuenow="42" aria-valuetext="42 %">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6 3 12l6 6M15 6l6 6-6 6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+        </div>
+        <button class="opt map-btn" id="btn3d" aria-pressed="true">Vue 3D</button>
+        <div class="notice show" id="notice"><p id="noticeText">Chargement du jumeau…</p></div>
+      </div>
+
+      <aside class="panel" aria-live="polite">
+        <div class="panel-head">
+          <h2>Tableau de bord</h2>
+          <div class="sync"><span class="dot" id="syncDot"></span><span id="syncText">Synchronisé, dernière mesure à --:--:--</span></div>
+        </div>
+        <div class="sec">
+          <div class="kpis">
+            <div><div class="kpi-label">Pression moyenne</div><div class="kpi-value"><span id="kPress">–</span><span class="kpi-unit">bar</span></div></div>
+            <div><div class="kpi-label">Débit entrant</div><div class="kpi-value"><span id="kFlow">–</span><span class="kpi-unit">m³/h</span></div></div>
+          </div>
+          <svg class="spark" id="spark" viewBox="0 0 300 56" preserveAspectRatio="none" aria-label="Évolution de la pression moyenne"><polyline id="sparkLine" fill="none" stroke="#1F6FB2" stroke-width="2" points=""/></svg>
+        </div>
+        <div class="sec scenario" id="scenario">
+          <p class="scenario-title" id="scTitle">Aucune anomalie</p>
+          <p id="scText">Le réseau fonctionne normalement. Cliquez sur une conduite bleue de la carte, ou utilisez le bouton.</p>
+          <button class="action" id="btnBreak" type="button" style="margin-top:10px">Simuler une casse</button>
+          <div id="scResults" hidden>
+            <div class="results">
+              <span>Vannes à fermer</span><b id="rValves">–</b>
+              <span>Conduite isolée</span><b id="rLength">–</b>
+              <span>Bâtiments privés d’eau</span><b id="rBld">–</b>
+            </div>
+            <button class="action" id="scAction" type="button">Fermer les vannes</button>
+          </div>
+        </div>
+        <div class="sec">
+          <p class="sec-title">Journal du jumeau</p>
+          <ul class="log" id="log"></ul>
+        </div>
+        <div class="panel-foot">Réseau, vannes et mesures simulés à partir des rues OpenStreetMap. Ils ne représentent pas le réseau réel.</div>
+      </aside>
+    </div>
+
+    <div class="legend" aria-hidden="true">
+      <span><i class="sw"></i>Conduite d’eau</span>
+      <span><i class="sw v"></i>Vanne</span>
+      <span><i class="sw c"></i>Capteur de pression</span>
+      <span><i class="sw iso"></i>Zone isolée</span>
+      <span><i class="sw bld"></i>Bâtiment privé d’eau</span>
+    </div>
+    <figcaption class="credit-only"><span class="credit">Imagerie : Esri, Maxar, Earthstar Geographics et la communauté des utilisateurs SIG. Données : © contributeurs OpenStreetMap, OpenMapTiles, OpenFreeMap.</span></figcaption>
+  </figure>
+</main>
+
+<script>
+/* GRAPH-START */
+const TWIN = (function(){
+  const M_LAT = 110540;
+  function mLng(lat){ return 111320 * Math.cos(lat * Math.PI / 180); }
+  function hash(s){ let h = 2166136261; for (let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+  function ekey(a, b){ return a < b ? a + "|" + b : b + "|" + a; }
+  function distM(p, q){ const k = mLng((p[1] + q[1]) / 2); return Math.hypot((p[0] - q[0]) * k, (p[1] - q[1]) * M_LAT); }
+  function segDistM(p, a, b){
+    const k = mLng(p[1]);
+    const ax = (a[0] - p[0]) * k, ay = (a[1] - p[1]) * M_LAT, bx = (b[0] - p[0]) * k, by = (b[1] - p[1]) * M_LAT;
+    const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy;
+    const t = L ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L)) : 0;
+    return Math.hypot(ax + t * dx, ay + t * dy);
+  }
+
+  // Construit un graphe de conduites le long des rues (sommets fusionnés sur une grille d'environ 3 m)
+  function buildGraph(features, bbox){
+    const cellLat = 0.000027, cellLng = cellLat / Math.cos(((bbox[1] + bbox[3]) / 2) * Math.PI / 180);
+    const nodes = new Map(), adj = new Map(), edges = new Map();
+    const inBox = (c) => c[0] >= bbox[0] && c[0] <= bbox[2] && c[1] >= bbox[1] && c[1] <= bbox[3];
+    const node = (c) => {
+      const k = Math.round(c[0] / cellLng) + "_" + Math.round(c[1] / cellLat);
+      if (!nodes.has(k)){ nodes.set(k, [c[0], c[1]]); adj.set(k, new Set()); }
+      return k;
+    };
+    for (const f of features){
+      const g = f.geometry; if (!g) continue;
+      const lines = g.type === "LineString" ? [g.coordinates] : g.type === "MultiLineString" ? g.coordinates : [];
+      for (const line of lines){
+        for (let i = 0; i < line.length - 1; i++){
+          if (!inBox(line[i]) && !inBox(line[i + 1])) continue;
+          const a = node(line[i]), b = node(line[i + 1]);
+          if (a === b) continue;
+          const k = ekey(a, b);
+          if (!edges.has(k)){ edges.set(k, [a, b]); adj.get(a).add(b); adj.get(b).add(a); }
+          if (edges.size > 40000) break;
+        }
+      }
+    }
+    const valves = new Set();
+    for (const [k, s] of adj){ if (s.size >= 3 && hash(k) % 2 === 0) valves.add(k); }
+    return { nodes, adj, edges, valves };
+  }
+
+  // Trace d'isolement : parcours du réseau depuis la casse jusqu'aux vannes
+  function isolate(graph, edgeK){
+    const [a, b] = graph.edges.get(edgeK);
+    const zoneEdges = new Set([edgeK]), zoneNodes = new Set(), boundary = new Set(), queue = [];
+    for (const n of [a, b]){ zoneNodes.add(n); if (graph.valves.has(n)) boundary.add(n); else queue.push(n); }
+    while (queue.length && zoneEdges.size < 6000){
+      const n = queue.pop();
+      for (const m of graph.adj.get(n)){
+        const k = ekey(n, m);
+        if (zoneEdges.has(k)) continue;
+        zoneEdges.add(k);
+        if (zoneNodes.has(m)) continue;
+        zoneNodes.add(m);
+        if (graph.valves.has(m)) boundary.add(m); else queue.push(m);
+      }
+    }
+    let length = 0;
+    for (const k of zoneEdges){ const [p, q] = graph.edges.get(k); length += distM(graph.nodes.get(p), graph.nodes.get(q)); }
+    return { zoneEdges, zoneNodes, boundary, length };
+  }
+
+  function nearestEdge(graph, project, px, tolPx){
+    let best = null;
+    for (const [k, [a, b]] of graph.edges){
+      const A = project(graph.nodes.get(a)), B = project(graph.nodes.get(b));
+      const dx = B.x - A.x, dy = B.y - A.y, L = dx * dx + dy * dy;
+      const t = L ? Math.max(0, Math.min(1, ((px.x - A.x) * dx + (px.y - A.y) * dy) / L)) : 0;
+      const d = Math.hypot(A.x + t * dx - px.x, A.y + t * dy - px.y);
+      if (d <= tolPx && (!best || d < best.d)) best = { k, d, t };
+    }
+    return best;
+  }
+
+  function ringCentroid(r){ let x = 0, y = 0, n = Math.max(1, r.length - 1); for (let i = 0; i < n; i++){ x += r[i][0]; y += r[i][1]; } return [x / n, y / n]; }
+
+  // Bâtiments desservis par la zone isolée (branchement supposé sur la conduite la plus proche)
+  function impactedBuildings(graph, iso, features, maxDist){
+    const segs = [...iso.zoneEdges].map(k => { const [p, q] = graph.edges.get(k); return [graph.nodes.get(p), graph.nodes.get(q)]; });
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [p, q] of segs){ minX = Math.min(minX, p[0], q[0]); maxX = Math.max(maxX, p[0], q[0]); minY = Math.min(minY, p[1], q[1]); maxY = Math.max(maxY, p[1], q[1]); }
+    const pad = 0.0006;
+    const seen = new Set(), out = [];
+    for (const f of features){
+      const g = f.geometry; if (!g) continue;
+      const polys = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];
+      for (const poly of polys){
+        const c = ringCentroid(poly[0]);
+        if (c[0] < minX - pad || c[0] > maxX + pad || c[1] < minY - pad || c[1] > maxY + pad) continue;
+        const key = c[0].toFixed(5) + "," + c[1].toFixed(5);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        // Branchement : le bâtiment est rattaché à la conduite la plus proche de tout le réseau
+        let dZone = Infinity;
+        for (const [p, q] of segs){ dZone = Math.min(dZone, segDistM(c, p, q)); if (dZone < 1) break; }
+        if (dZone > maxDist) continue;
+        let closer = false;
+        for (const [k, [p, q]] of graph.edges){
+          if (iso.zoneEdges.has(k)) continue;
+          const P = graph.nodes.get(p), Q = graph.nodes.get(q);
+          if (Math.abs(P[1] - c[1]) > 0.0005 || Math.abs(P[0] - c[0]) > 0.0006) continue;
+          if (segDistM(c, P, Q) < dZone - 0.5){ closer = true; break; }
+        }
+        if (closer) continue;
+        const grow = (ring) => ring.map(pt => [c[0] + (pt[0] - c[0]) * 1.04, c[1] + (pt[1] - c[1]) * 1.04]);
+        out.push({ type:"Feature",
+          properties:{ h:(f.properties.render_height || 6) + 1.2, base:f.properties.render_min_height || 0 },
+          geometry:{ type:"Polygon", coordinates: poly.map(grow) } });
+      }
+    }
+    return out;
+  }
+
+  function pickSensors(graph, bbox, max){
+    const cand = [...graph.adj.entries()].filter(([k, s]) => {
+      const c = graph.nodes.get(k); return s.size >= 3 && c[0] > bbox[0] && c[0] < bbox[2] && c[1] > bbox[1] && c[1] < bbox[3];
+    }).map(([k]) => k).sort((a, b) => hash(a) - hash(b));
+    const chosen = [];
+    for (const k of cand){
+      const c = graph.nodes.get(k);
+      if (chosen.every(s => distM(s.c, c) > 230)) chosen.push({ k, c, base: 3.0 + (hash(k) % 70) / 100 });
+      if (chosen.length >= max) break;
+    }
+    return chosen.map((s, i) => Object.assign(s, { id: "C" + (i + 1) }));
+  }
+
+  return { buildGraph, isolate, nearestEdge, impactedBuildings, pickSensors, distM, ekey, hash };
+})();
+/* GRAPH-END */
+
+(function(){
+  const VERSION = "5.24.0";
+  const CDNS = ["https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/" + VERSION + "/", "https://unpkg.com/maplibre-gl@" + VERSION + "/dist/"];
+  const notice = document.getElementById("notice"), noticeText = document.getElementById("noticeText");
+  function showNotice(msg){ noticeText.textContent = msg; notice.classList.add("show"); }
+  function loadCss(href){ const l = document.createElement("link"); l.rel = "stylesheet"; l.href = href; document.head.appendChild(l); }
+  function loadScript(src){ return new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); }); }
+  (async function(){
+    for (const base of CDNS){ try { loadCss(base + "maplibre-gl.css"); await loadScript(base + "maplibre-gl.js"); if (window.maplibregl) break; } catch(e){} }
+    if (!window.maplibregl){ showNotice("La bibliothèque cartographique n’a pas pu se charger. Vérifiez la connexion, puis ouvrez la page via un serveur local."); return; }
+    try { init(); } catch(e){ console.error(e); showNotice("La carte ne peut pas s’afficher : WebGL est indisponible dans ce navigateur."); }
+  })();
+
+  function init(){
+    const PLACES = {
+      rabat:     { center:[-6.8365, 34.0172], zoom:16.1 },
+      casa:      { center:[-7.6330, 33.5850], zoom:16.1 },
+      marrakech: { center:[-8.0100, 31.6340], zoom:16.1 }
+    };
+    const OMT = { type:"vector", url:"https://tiles.openfreemap.org/planet" };
+    const GLYPHS = "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf";
+    const EMPTY = { type:"FeatureCollection", features:[] };
+    const gj = () => ({ type:"geojson", data:EMPTY });
+    const roadW = (a, b, c, d) => {
+      const m = (k) => ["match",["get","class"],["motorway","trunk"],a*k,["primary","secondary"],b*k,["tertiary"],c*k,d*k];
+      return ["interpolate",["exponential",1.6],["zoom"],12,m(0.4),15,m(1),18,m(4)];
+    };
+    const ROADS = ["match",["get","class"],["motorway","trunk","primary","secondary","tertiary","minor","service"],true,false];
+    const NET_CLASSES = ["match",["get","class"],["primary","secondary","tertiary","minor","service"],true,false];
+
+    const realStyle = {
+      version:8, glyphs:GLYPHS,
+      sources:{ imagery:{ type:"raster", tileSize:256, maxzoom:19, tiles:["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"] }, brk:gj() },
+      layers:[
+        { id:"imagery", type:"raster", source:"imagery" },
+        { id:"brk-halo", type:"circle", source:"brk", paint:{ "circle-radius":18, "circle-color":"#D6336C", "circle-opacity":0.25 } },
+        { id:"brk", type:"circle", source:"brk", paint:{ "circle-radius":7, "circle-color":"#D6336C", "circle-stroke-color":"#fff", "circle-stroke-width":2.5 } }
+      ]
+    };
+    const modelStyle = {
+      version:8, glyphs:GLYPHS,
+      sources:{ omt:OMT, net:gj(), iso:gj(), valves:gj(), closing:gj(), sensors:gj(), impacted:gj(), brk:gj() },
+      layers:[
+        { id:"bg", type:"background", paint:{ "background-color":"#ECEDE8" } },
+        { id:"landuse", type:"fill", source:"omt", "source-layer":"landuse", paint:{ "fill-color":["match",["get","class"],["school","university","college","hospital"],"#E8E0CF",["industrial","railway","commercial","retail"],"#E4E2DA","#ECEDE8"] } },
+        { id:"landcover", type:"fill", source:"omt", "source-layer":"landcover", paint:{ "fill-color":["match",["get","class"],["sand"],"#EDE3C8",["wood","forest"],"#BFD6B0","#CFE0C4"], "fill-opacity":0.9 } },
+        { id:"park", type:"fill", source:"omt", "source-layer":"park", paint:{ "fill-color":"#CFE0C4" } },
+        { id:"water", type:"fill", source:"omt", "source-layer":"water", paint:{ "fill-color":"#A9CBE6" } },
+        { id:"road-casing", type:"line", source:"omt", "source-layer":"transportation", filter:ROADS, layout:{ "line-cap":"round","line-join":"round" }, paint:{ "line-color":"#CBD0CD", "line-width":roadW(9,7.5,6,4) } },
+        { id:"road", type:"line", source:"omt", "source-layer":"transportation", filter:ROADS, layout:{ "line-cap":"round","line-join":"round" }, paint:{ "line-color":"#FFFFFF", "line-width":roadW(7,6,4.6,2.8) } },
+        { id:"net", type:"line", source:"net", layout:{ "line-cap":"round","line-join":"round" }, paint:{ "line-color":"#1F6FB2", "line-width":["interpolate",["linear"],["zoom"],14,1.2,17,3,19,5] } },
+        { id:"iso-glow", type:"line", source:"iso", layout:{ "line-cap":"round","line-join":"round" }, paint:{ "line-color":"#F2B33D", "line-width":["interpolate",["linear"],["zoom"],14,5,17,12,19,20], "line-opacity":0.9 } },
+        { id:"iso", type:"line", source:"iso", layout:{ "line-cap":"round","line-join":"round" }, paint:{ "line-color":["case",["get","closed"],"#7A4B00","#D6336C"], "line-width":["interpolate",["linear"],["zoom"],14,1.5,17,3.5,19,6] } },
+        { id:"building-2d", type:"fill", source:"omt", "source-layer":"building", minzoom:13, layout:{ visibility:"none" }, paint:{ "fill-color":"#D5D7D2", "fill-outline-color":"#A9AFA9" } },
+        { id:"building-3d", type:"fill-extrusion", source:"omt", "source-layer":"building", minzoom:14, paint:{
+          "fill-extrusion-color":["interpolate",["linear"],["coalesce",["get","render_height"],6],0,"#E6E9E7",12,"#CFDAE1",30,"#9DB9CE",80,"#4F86B5"],
+          "fill-extrusion-height":["coalesce",["get","render_height"],6], "fill-extrusion-base":["coalesce",["get","render_min_height"],0], "fill-extrusion-opacity":0.9 } },
+        { id:"impacted-2d", type:"fill", source:"impacted", layout:{ visibility:"none" }, paint:{ "fill-color":"#D6336C", "fill-opacity":0.85 } },
+        { id:"impacted-3d", type:"fill-extrusion", source:"impacted", paint:{ "fill-extrusion-color":"#D6336C", "fill-extrusion-height":["get","h"], "fill-extrusion-base":["get","base"], "fill-extrusion-opacity":0.95 } },
+        { id:"valves", type:"circle", source:"valves", minzoom:15, paint:{ "circle-radius":["interpolate",["linear"],["zoom"],15,2,18,5], "circle-color":"#FFFFFF", "circle-stroke-color":"#1D2B36", "circle-stroke-width":1.5 } },
+        { id:"closing", type:"circle", source:"closing", paint:{ "circle-radius":9, "circle-color":["case",["get","closed"],"#1D2B36","#FFFFFF"], "circle-stroke-color":"#D6336C", "circle-stroke-width":3 } },
+        { id:"brk-halo", type:"circle", source:"brk", paint:{ "circle-radius":18, "circle-color":"#D6336C", "circle-opacity":0.25 } },
+        { id:"brk", type:"circle", source:"brk", paint:{ "circle-radius":7, "circle-color":"#D6336C", "circle-stroke-color":"#fff", "circle-stroke-width":2.5 } },
+        { id:"sensor-pulse", type:"circle", source:"sensors", paint:{ "circle-radius":10, "circle-color":"transparent", "circle-stroke-width":2, "circle-stroke-color":["get","color"], "circle-stroke-opacity":0.5 } },
+        { id:"sensors", type:"circle", source:"sensors", paint:{ "circle-radius":6.5, "circle-color":"#FFFFFF", "circle-stroke-width":3.5, "circle-stroke-color":["get","color"] } },
+        { id:"sensor-label", type:"symbol", source:"sensors", layout:{ "text-field":["get","label"], "text-font":["Noto Sans Bold"], "text-size":12, "text-offset":[0,-1.5], "text-anchor":"bottom", "text-allow-overlap":true }, paint:{ "text-color":"#1D2B36", "text-halo-color":"#FFFFFF", "text-halo-width":2 } }
+      ]
+    };
+
+    const start = PLACES.rabat;
+    const cam = { center:start.center, zoom:start.zoom, pitch:55, bearing:-20, maxPitch:70, attributionControl:false };
+    const real  = new maplibregl.Map(Object.assign({ container:"real",  style:realStyle }, cam));
+    const model = new maplibregl.Map(Object.assign({ container:"model", style:modelStyle, interactive:false }, cam));
+    real.addControl(new maplibregl.NavigationControl({ visualizePitch:true }), "bottom-left");
+    real.on("move", () => model.jumpTo({ center:real.getCenter(), zoom:real.getZoom(), bearing:real.getBearing(), pitch:real.getPitch() }));
+
+    let ready = 0;
+    [real, model].forEach(m => m.on("load", () => { m.resize(); if (++ready === 2){ notice.classList.remove("show"); scheduleRebuild(); } }));
+    setTimeout(() => { if (ready < 2) showNotice(location.protocol === "file:" ? "Ouvrez cette page via un serveur local (par exemple « python -m http.server 8000 »)." : "Les fonds de carte ne répondent pas. Vérifiez la connexion, puis rechargez la page."); }, 15000);
+
+    /* ---------- État du jumeau ---------- */
+    let graph = null, sensors = [], scenario = null, history = [], t0 = Date.now();
+    const $ = (id) => document.getElementById(id);
+    const fmt = (v, d) => v.toFixed(d).replace(".", ",");
+    const nowStr = () => new Date().toLocaleTimeString("fr-FR", { hour12:false });
+
+    function log(msg, alert){
+      const li = document.createElement("li"); if (alert) li.className = "alert";
+      li.innerHTML = "<time></time><span></span>"; li.firstChild.textContent = nowStr(); li.lastChild.textContent = msg;
+      const ul = $("log"); ul.prepend(li); while (ul.children.length > 4) ul.lastChild.remove();
+    }
+
+    function setData(map, src, data){ const s = map.getSource(src); if (s) s.setData(data); }
+    function viewBbox(margin){
+      const b = model.getBounds(); const dx = (b.getEast() - b.getWest()) * margin, dy = (b.getNorth() - b.getSouth()) * margin;
+      return [b.getWest() - dx, b.getSouth() - dy, b.getEast() + dx, b.getNorth() + dy];
+    }
+
+    let rebuildTimer = null, attempts = 0;
+    function scheduleRebuild(){
+      clearTimeout(rebuildTimer); attempts = 0;
+      const check = () => {
+        if (scenario) return;
+        attempts++;
+        const ok = model.isStyleLoaded() && model.areTilesLoaded() && rebuild();
+        if (!ok && attempts < 40) rebuildTimer = setTimeout(check, 400);
+      };
+      rebuildTimer = setTimeout(check, 400);
+    }
+    function rebuild(){
+      if (scenario) return true;
+      const feats = model.querySourceFeatures("omt", { sourceLayer:"transportation", filter:NET_CLASSES });
+      if (!feats.length) return false;
+      graph = TWIN.buildGraph(feats, viewBbox(0.25));
+      const lines = []; for (const [, [a, b]] of graph.edges) lines.push([graph.nodes.get(a), graph.nodes.get(b)]);
+      setData(model, "net", { type:"FeatureCollection", features:[{ type:"Feature", properties:{}, geometry:{ type:"MultiLineString", coordinates:lines } }] });
+      setData(model, "valves", { type:"FeatureCollection", features:[{ type:"Feature", properties:{}, geometry:{ type:"MultiPoint", coordinates:[...graph.valves].map(k => graph.nodes.get(k)) } }] });
+      const prev = sensors.length;
+      sensors = TWIN.pickSensors(graph, viewBbox(-0.12), 7);
+      if (!prev && sensors.length) log(sensors.length + " capteurs connectés, réseau de " + graph.edges.size + " tronçons");
+      tick();
+      return true;
+    }
+    real.on("moveend", () => { if (!scenario) scheduleRebuild(); });
+
+    /* ---------- Mesures simulées ---------- */
+    function sensorValue(s, i, t){
+      let v = s.base + 0.12 * Math.sin(t / 7 + i) + (Math.random() - 0.5) * 0.05;
+      let status = "ok";
+      if (scenario){
+        const inZone = scenario.iso.zoneNodes.has(s.k);
+        const d = TWIN.distM(s.c, scenario.point);
+        if (scenario.stage === "leak"){
+          if (inZone){ v = Math.max(0.6, s.base - 1.9 + (Math.random() - 0.5) * 0.1); status = "alert"; }
+          else if (d < 600){ v -= 0.7 * (1 - d / 600); status = v < s.base - 0.35 ? "alert" : "ok"; }
+        } else if (scenario.stage === "closed" && inZone){ v = 0.05; status = "off"; }
+      }
+      return { v, status };
+    }
+    function tick(){
+      if (!graph){ $("syncText").textContent = "Connexion au réseau…"; return; }
+      const t = (Date.now() - t0) / 1000;
+      const COLORS = { ok:"#2F9E6A", alert:"#D6336C", off:"#8A979C" };
+      let sum = 0, n = 0;
+      const feats = sensors.map((s, i) => {
+        const { v, status } = sensorValue(s, i, t);
+        if (status !== "off"){ sum += v; n++; }
+        return { type:"Feature", properties:{ color:COLORS[status], label:s.id + "  " + fmt(v, 1) + " bar" }, geometry:{ type:"Point", coordinates:s.c } };
+      });
+      setData(model, "sensors", { type:"FeatureCollection", features:feats });
+      const press = n ? sum / n : 0;
+      let flow = 420 + 25 * Math.sin(t / 11) + (Math.random() - 0.5) * 6;
+      if (scenario && scenario.stage === "leak") flow *= 1.18;
+      if (scenario && scenario.stage === "closed") flow -= scenario.buildings * 1.4;
+      $("kPress").textContent = n ? fmt(press, 2) : "–";
+      $("kFlow").textContent = Math.round(flow);
+      history.push(press); if (history.length > 60) history.shift();
+      const min = 1.5, max = 4.2;
+      $("sparkLine").setAttribute("points", history.map((p, i) => (i * 300 / 59).toFixed(1) + "," + (56 - (Math.max(min, Math.min(max, p)) - min) / (max - min) * 52 - 2).toFixed(1)).join(" "));
+      $("sparkLine").setAttribute("stroke", scenario && scenario.stage === "leak" ? "#D6336C" : "#1F6FB2");
+      $("syncText").textContent = "Synchronisé, dernière mesure à " + nowStr();
+    }
+    setInterval(tick, 1000);
+
+    // Pulsation des capteurs (désactivée si l'utilisateur préfère réduire les animations)
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches){
+      setInterval(() => {
+        if (!model.getLayer("sensor-pulse")) return;
+        const p = ((Date.now() - t0) % 1600) / 1600;
+        model.setPaintProperty("sensor-pulse", "circle-radius", 8 + p * 16);
+        model.setPaintProperty("sensor-pulse", "circle-stroke-opacity", 0.6 * (1 - p));
+      }, 60);
+    }
+
+    /* ---------- Scénario : casse, trace d'isolement, action ---------- */
+    real.on("click", (e) => {
+      if (!graph){ log("Le réseau est encore en cours de chargement"); return; }
+      if (scenario){ log("Une casse est déjà en cours de traitement"); return; }
+      const hit = TWIN.nearestEdge(graph, (c) => model.project(c), e.point, 22);
+      if (!hit){ log("Cliquez plus près d’une conduite bleue"); return; }
+      startBreak(hit);
+    });
+
+    $("btnBreak").addEventListener("click", () => {
+      if (!graph){ log("Le réseau est encore en cours de chargement"); return; }
+      if (scenario) return;
+      const w = model.getCanvas().clientWidth, h = model.getCanvas().clientHeight;
+      const x0 = w * (pct / 100), cands = [];
+      for (const [k, [a, b]] of graph.edges){
+        const A = graph.nodes.get(a), B = graph.nodes.get(b);
+        if (TWIN.distM(A, B) < 6) continue;
+        const m = model.project([(A[0] + B[0]) / 2, (A[1] + B[1]) / 2]);
+        if (m.x > x0 + (w - x0) * 0.2 && m.x < w * 0.9 && m.y > h * 0.35 && m.y < h * 0.8) cands.push(k);
+      }
+      if (!cands.length){ log("Aucune conduite visible : zoomez sur le quartier"); return; }
+      startBreak({ k: cands[Math.floor(Math.random() * cands.length)], t: 0.5 });
+    });
+
+    function startBreak(hit){
+      const [a, b] = graph.edges.get(hit.k), A = graph.nodes.get(a), B = graph.nodes.get(b);
+      const point = [A[0] + (B[0] - A[0]) * hit.t, A[1] + (B[1] - A[1]) * hit.t];
+      const iso = TWIN.isolate(graph, hit.k);
+      const bld = TWIN.impactedBuildings(graph, iso, model.querySourceFeatures("omt", { sourceLayer:"building" }), 45);
+      scenario = { stage:"leak", point, iso, buildings:bld.length, bldFeatures:bld };
+      const brk = { type:"FeatureCollection", features:[{ type:"Feature", properties:{}, geometry:{ type:"Point", coordinates:point } }] };
+      setData(real, "brk", brk); setData(model, "brk", brk);
+      $("hint").hidden = true; $("btnBreak").hidden = true;
+      $("scenario").classList.add("alert");
+      $("scTitle").textContent = "Casse détectée";
+      $("scText").textContent = "Chute de pression et pic de débit. Analyse du réseau en cours…";
+      $("scResults").hidden = true;
+      log("Chute de pression anormale détectée", true);
+      tick();
+      setTimeout(() => {
+        if (!scenario) return;
+        const zoneLines = [...iso.zoneEdges].map(k => { const [p, q] = graph.edges.get(k); return [graph.nodes.get(p), graph.nodes.get(q)]; });
+        setData(model, "iso", { type:"FeatureCollection", features:[{ type:"Feature", properties:{ closed:false }, geometry:{ type:"MultiLineString", coordinates:zoneLines } }] });
+        setData(model, "closing", { type:"FeatureCollection", features:[...iso.boundary].map(k => ({ type:"Feature", properties:{ closed:false }, geometry:{ type:"Point", coordinates:graph.nodes.get(k) } })) });
+        setData(model, "impacted", { type:"FeatureCollection", features:bld });
+        $("scText").textContent = "Trace d’isolement calculée. Validez la fermeture des vannes pour arrêter la fuite.";
+        $("rValves").textContent = iso.boundary.size;
+        $("rLength").textContent = Math.round(iso.length) + " m";
+        $("rBld").textContent = bld.length;
+        $("scResults").hidden = false;
+        $("scAction").textContent = "Fermer les " + iso.boundary.size + " vannes";
+        $("scAction").className = "action";
+        log("Trace d’isolement : " + iso.boundary.size + " vannes, " + bld.length + " bâtiments touchés");
+      }, 1400);
+    }
+
+    $("scAction").addEventListener("click", () => {
+      if (!scenario) return;
+      if (scenario.stage === "leak"){
+        scenario.stage = "closed";
+        const iso = scenario.iso;
+        setData(model, "iso", { type:"FeatureCollection", features:[{ type:"Feature", properties:{ closed:true }, geometry:{ type:"MultiLineString", coordinates:[...iso.zoneEdges].map(k => { const [p, q] = graph.edges.get(k); return [graph.nodes.get(p), graph.nodes.get(q)]; }) } }] });
+        setData(model, "closing", { type:"FeatureCollection", features:[...iso.boundary].map(k => ({ type:"Feature", properties:{ closed:true }, geometry:{ type:"Point", coordinates:graph.nodes.get(k) } })) });
+        $("scenario").classList.remove("alert");
+        $("scTitle").textContent = "Zone isolée";
+        $("scText").textContent = "Les vannes sont fermées et la fuite est stoppée. Les usagers de la zone doivent être prévenus pendant la réparation.";
+        $("scAction").textContent = "Réparer et remettre en service";
+        $("scAction").className = "action secondary";
+        log("Vannes fermées sur validation de l’exploitant");
+      } else {
+        const b = scenario.buildings;
+        scenario = null;
+        ["iso","closing","impacted","brk"].forEach(s => setData(model, s, EMPTY)); setData(real, "brk", EMPTY);
+        $("scTitle").textContent = "Aucune anomalie";
+        $("scText").textContent = "Le réseau fonctionne normalement. Cliquez sur une conduite bleue de la carte, ou utilisez le bouton.";
+        $("scResults").hidden = true; $("btnBreak").hidden = false;
+        log("Conduite réparée, " + b + " bâtiments de nouveau alimentés");
+        scheduleRebuild();
+      }
+      tick();
+    });
+
+    /* ---------- Curseur de comparaison ---------- */
+    const compare = $("compare"), divider = $("divider"), knob = $("knob"), modelEl = $("model");
+    let pct = 42;
+    function setPct(p){ pct = Math.max(0, Math.min(100, p)); divider.style.left = pct + "%"; modelEl.style.clipPath = "inset(0 0 0 " + pct + "%)"; knob.setAttribute("aria-valuenow", Math.round(pct)); knob.setAttribute("aria-valuetext", Math.round(pct) + " %"); }
+    setPct(42);
+    let dragging = false;
+    const fromEvent = (e) => { const r = compare.getBoundingClientRect(); return (e.clientX - r.left) / r.width * 100; };
+    [knob, $("dividerHit")].forEach(el => {
+      el.addEventListener("pointerdown", (e) => { dragging = true; e.currentTarget.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation(); });
+      el.addEventListener("pointermove", (e) => { if (dragging){ setPct(fromEvent(e)); e.preventDefault(); } });
+      el.addEventListener("pointerup", () => dragging = false);
+      el.addEventListener("pointercancel", () => dragging = false);
+    });
+    knob.addEventListener("keydown", (e) => {
+      const step = e.shiftKey ? 10 : 2;
+      if (e.key === "ArrowLeft") setPct(pct - step); else if (e.key === "ArrowRight") setPct(pct + step);
+      else if (e.key === "Home") setPct(0); else if (e.key === "End") setPct(100); else return;
+      e.preventDefault();
+    });
+    window.addEventListener("resize", () => { real.resize(); model.resize(); });
+
+    /* ---------- Quartiers et vue 3D ---------- */
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const go = (o) => reduce ? real.jumpTo(o) : real.easeTo(Object.assign({ duration:1400 }, o));
+    let is3d = true;
+    $("btn3d").addEventListener("click", () => {
+      if (!model.isStyleLoaded()) return;
+      is3d = !is3d; $("btn3d").setAttribute("aria-pressed", String(is3d));
+      model.setLayoutProperty("building-3d", "visibility", is3d ? "visible" : "none");
+      model.setLayoutProperty("impacted-3d", "visibility", is3d ? "visible" : "none");
+      model.setLayoutProperty("building-2d", "visibility", is3d ? "none" : "visible");
+      model.setLayoutProperty("impacted-2d", "visibility", is3d ? "none" : "visible");
+      go(is3d ? { pitch:55, bearing:-20 } : { pitch:0, bearing:0 });
+    });
+    log("Connexion au jumeau numérique");
+  }
+})();
+</script>
+</body>
+</html>
